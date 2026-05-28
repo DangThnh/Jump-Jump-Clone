@@ -15,28 +15,19 @@ class GameScene extends Phaser.Scene {
         // --- THÊM BIẾN NÀY ĐỂ QUẢN LÝ KÍCH THƯỚC CHUẨN ---
         this.baseScale = 2; 
 
-       // --- THÔNG SỐ HITBOX CHUẨN (CẬU SẼ TỰ CHỈNH LẠI CÁC SỐ NÀY KHI NHÌN HÌNH VẼ) ---
-        this.surfaceOffset = 32; // Khoảng cách từ tâm ảnh hộp LÊN mặt phẳng trên cùng
-        this.boxRadius = 64;     // Bán kính va chạm ngang
-        this.perfectRadius = 15; // Bán kính ăn điểm Perfect
-        
-        // BỘ CỌ VẼ DEBUG HITBOX (Luôn nổi trên cùng)
-        this.debugGraphics = this.add.graphics().setDepth(100);
-
         // 2. KHỞI TẠO GAME OBJECTS
         this.platforms = this.add.group();
         
         this.currentBox = this.add.sprite(225, 600, 'box_normal');
         this.currentBox.setOrigin(0.5, 0.5); 
-        this.currentBox.setScale(this.baseScale); 
+        this.currentBox.setScale(this.baseScale); // Dùng biến thay vì số 2
         this.platforms.add(this.currentBox);
 
-        // FIX LỖI LỆCH TỌA ĐỘ TỪ ĐẦU GAME:
-        // Đặt Player đúng vào tọa độ mặt trên của khối hộp (currentBox.y - this.surfaceOffset)
-        this.player = this.add.sprite(225, 600 - this.surfaceOffset, 'piece'); 
+        this.player = this.add.sprite(225, 570, 'piece'); 
         this.player.setOrigin(0.5, 1); 
-        this.player.setScale(this.baseScale); 
-        this.player.setDepth(10);
+        this.player.setScale(this.baseScale); // Dùng biến thay vì số 2
+        this.player.setDepth(10); 
+        this.playerHeight = this.player.height * this.baseScale; 
         
         // BIẾN QUẢN LÝ ĐIỂM
         this.score = 0;
@@ -97,7 +88,7 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: this.currentBox, scaleY: this.baseScale, duration: 300, ease: 'Elastic.easeOut' });
 
         // 2. Tính toán điểm rơi dựa vào lực
-        let distance = this.chargeTime * 0.5; // Hệ số k=0.25 (Cậu có thể chỉnh sửa để nhảy xa/gần hơn)
+        let distance = this.chargeTime * 0.5; 
         
         // Fix tâm xoay: Đưa tâm về giữa để lộn vòng 360 độ cho đẹp
         this.player.setOrigin(0.5, 0.5);
@@ -113,7 +104,7 @@ class GameScene extends Phaser.Scene {
         let targetX = startX + sign * distance * Math.cos(angleRad);
         let targetY = startY - distance * Math.sin(angleRad);
         
-        let peakHeight = distance * 0.5; // Độ cao đỉnh Parabol (tỷ lệ thuận với độ xa)
+        let peakHeight = distance * 0.5; 
 
         // 3. Hoạt ảnh xoay lộn vòng (Bottle Flip)
         this.tweens.add({
@@ -123,25 +114,27 @@ class GameScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // 4. Tween Parabol chạy quỹ đạo bay (ĐÃ FIX)
-        let dummy = { t: 0 }; // Tạo một object giả chứa biến t
+        // 4. Tween Parabol chạy quỹ đạo bay
+        let dummy = { t: 0 }; 
         this.tweens.add({
             targets: dummy,
-            t: 1, // Bắt Phaser phải đếm biến t từ 0 lên 1
+            t: 1, 
             duration: 600,
-            ease: 'Quad.easeOut', // Gia tốc chậm dần khi bay
+            ease: 'Quad.easeOut', 
             onUpdate: () => {
-                let t = dummy.t; // Lấy giá trị t hiện tại (từ 0 -> 1)
-                
-                // Di chuyển tịnh tiến X, Y
+                let t = dummy.t; 
                 this.player.x = startX + (targetX - startX) * t;
                 let currentLineY = startY + (targetY - startY) * t;
-                
-                // Trừ đi độ cao Parabol để tạo cảm giác nhô lên khỏi mặt đất
                 this.player.y = currentLineY - peakHeight * 4 * t * (1 - t);
             },
             onComplete: () => {
-                // Bay xong thì gọi hàm checkLanding
+                // --- CHÌA KHÓA NẰM Ở ĐÂY ---
+                // Cưỡng chế gắn tọa độ về chính xác điểm đích toán học 
+                // để bù trừ cho sai số thất thoát Frame của hàm onUpdate
+                this.player.x = targetX;
+                this.player.y = targetY;
+
+                // Bây giờ tính va chạm mới chuẩn 100%
                 this.checkLanding(targetX, targetY);
             }
         });
@@ -157,24 +150,26 @@ class GameScene extends Phaser.Scene {
 
         this.tweens.add({ targets: this.player, scaleY: this.baseScale * 0.85, duration: 50, yoyo: true, repeat: 1, ease: 'Quad.easeIn' });
 
-        // TÍNH TOÁN DỰA TRÊN BIẾN DÙNG CHUNG
-        let targetSurfaceY = this.nextBox.y - this.surfaceOffset; 
+        let surfaceOffset = 28; 
+        let targetSurfaceY = this.nextBox.y - surfaceOffset; 
 
         let dx = this.player.x - this.nextBox.x;
         let dy = (this.player.y - targetSurfaceY) * 2; 
         
         let distanceToCenter = Math.sqrt(dx*dx + dy*dy); 
+        
+        let boxRadius = 54;  
+        let perfectRadius = 16; 
 
-        // GỌI HÀM VẼ DEBUG RA MÀN HÌNH
-        this.drawDebugHitbox(targetSurfaceY);
-
-        if (distanceToCenter <= this.perfectRadius) {
+        if (distanceToCenter <= perfectRadius) {
+            // CỘNG 2 ĐIỂM VÀ UPDATE UI CHÍNH
             this.score += 2;
             this.scoreText.setText(this.score);
             this.debugText.setText('PERFECT! (+2)');
             this.handleSuccessJump();
         } 
-        else if (distanceToCenter <= this.boxRadius) {
+        else if (distanceToCenter <= boxRadius) {
+            // CỘNG 1 ĐIỂM VÀ UPDATE UI CHÍNH
             this.score += 1;
             this.scoreText.setText(this.score);
             this.debugText.setText('GOOD (+1)');
@@ -279,23 +274,6 @@ class GameScene extends Phaser.Scene {
         this.nextBox.y -= 400; 
         this.nextBox.alpha = 0;
         this.tweens.add({ targets: this.nextBox, y: nextY, alpha: 1, duration: 400, ease: 'Bounce.easeOut' });
-    }
-
-    drawDebugHitbox(targetSurfaceY) {
-        this.debugGraphics.clear(); // Xóa hình vẽ cũ
-
-        // 1. Vẽ vòng Elip ranh giới an toàn (MÀU XANH LÁ)
-        this.debugGraphics.lineStyle(2, 0x00ff00, 1); 
-        // Vòng Elip có chiều rộng = boxRadius * 2, chiều cao = boxRadius (vì bị nén một nửa)
-        this.debugGraphics.strokeEllipse(this.nextBox.x, targetSurfaceY, this.boxRadius * 2, this.boxRadius);
-
-        // 2. Vẽ Tâm toán học của bề mặt hộp (CHẤM ĐỎ)
-        this.debugGraphics.fillStyle(0xff0000, 1);
-        this.debugGraphics.fillCircle(this.nextBox.x, targetSurfaceY, 4);
-
-        // 3. Vẽ Điểm tiếp đất của gót chân Player (CHẤM XANH DƯƠNG)
-        this.debugGraphics.fillStyle(0x0000ff, 1);
-        this.debugGraphics.fillCircle(this.player.x, this.player.y, 4);
     }
 
 }
