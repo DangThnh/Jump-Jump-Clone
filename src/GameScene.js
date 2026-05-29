@@ -4,78 +4,123 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        // Đổi màu nền cho hợp mắt (Trắng ngà Pastel)
         this.cameras.main.setBackgroundColor('#faf8f5');
 
-      // 1. KHỞI TẠO CÁC BIẾN TRẠNG THÁI
+        // 1. KHỞI TẠO CÁC BIẾN TRẠNG THÁI
         this.isCharging = false;
         this.chargeTime = 0;
         this.maxChargeTime = 2000; 
-        
-        // --- THÊM BIẾN NÀY ĐỂ QUẢN LÝ KÍCH THƯỚC CHUẨN ---
         this.baseScale = 2; 
+        this.score = 0;
+        this.comboPerfect = 0; // Đếm chuỗi combo Perfect liên tục
 
-        // 2. KHỞI TẠO GAME OBJECTS
+        // --- ĐĂNG KÝ DANH SÁCH HỘP VÀ HITBOX RIÊNG BIỆT ---
+        // Mỗi loại hộp sẽ có độ cao mặt phẳng và bán kính va chạm khác nhau!
+        this.boxRegistry = {
+            'box_normal': { surfaceOffset: 28, boxRadius: 64, perfectRadius: 16 },
+            'box_round':  { surfaceOffset: 22, boxRadius: 50, perfectRadius: 12 },
+            'box_gift':   { surfaceOffset: 33, boxRadius: 70, perfectRadius: 18 }
+        };
+
+        // 2. KHỞI TẠO GAME OBJECTS & AUDIO
         this.platforms = this.add.group();
         
+        // Khởi tạo âm thanh nén lực dạng Loop (Lặp lại)
+        if (this.sound.get('sfx_charge')) {
+            this.chargeSound = this.sound.add('sfx_charge', { loop: true });
+        }
+
+        // Tạo khối hộp xuất phát mặc định (box_normal)
         this.currentBox = this.add.sprite(225, 600, 'box_normal');
         this.currentBox.setOrigin(0.5, 0.5); 
-        this.currentBox.setScale(this.baseScale); // Dùng biến thay vì số 2
+        this.currentBox.setScale(this.baseScale); 
         this.platforms.add(this.currentBox);
 
-        this.player = this.add.sprite(225, 570, 'piece'); 
+        // Gán metadata hitbox mặc định cho hộp đầu tiên
+        this.currentBox.surfaceOffset = this.boxRegistry['box_normal'].surfaceOffset;
+
+        // Tạo Player đứng chạm đúng mặt hộp
+        this.player = this.add.sprite(225, 600 - this.currentBox.surfaceOffset, 'piece'); 
         this.player.setOrigin(0.5, 1); 
-        this.player.setScale(this.baseScale); // Dùng biến thay vì số 2
+        this.player.setScale(this.baseScale); 
         this.player.setDepth(10); 
         this.playerHeight = this.player.height * this.baseScale; 
         
-        // BIẾN QUẢN LÝ ĐIỂM
-        this.score = 0;
+        this.spawnNextBox(); 
+        this.updateCameraPosition(0); 
 
-        // BẢNG ĐIỂM CHÍNH (To, mờ nhẹ ở background, cố định trên màn hình)
+     // 3. KHỔI TẠO HỆ THỐNG HẠT (VFX) - BẢN SỬA ĐỔI TRIỆT ĐỂ BẰNG SỐ THỰC 0.1
+        if (this.textures.exists('particle')) {
+            this.chargeEmitter = this.add.particles(0, 0, 'particle', {
+                lifespan: 400, 
+                scale: { start: 0.6, end: 0.1 }, 
+                alpha: { start: 0.8, end: 0 },   
+               
+                // Sinh hạt tương đối bao quanh quân cờ
+                x: { min: -80, max: 80 },
+                y: { min: -80, max: 80 },
+
+                // --- PHÉP THUẬT SỬA LỖI Ở ĐÂY ---
+                // Dùng 0.1 (thay vì 0) để vượt qua bộ lọc Falsy của Phaser,
+                // đồng thời ép hạt tụ vào đúng tâm Emitter (tâm quân cờ) theo hệ tọa độ Local
+                moveToX: 0.1,
+                moveToY: 0.1,
+               
+                frequency: 45, 
+                emitting: false
+            }).setDepth(5);
+        }
+
+        // Bảng điểm chính
         this.scoreText = this.add.text(225, 120, '0', { 
             fontSize: '80px', 
             fontFamily: 'Arial',
             fontWeight: 'bold',
-            fill: '#cccccc', // Màu xám nhạt cho đỡ chói
-            alpha: 0.5     // Hơi trong suốt để không che đồ họa
-        }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(20); // setDepth(20) để luôn nổi lên trên cùng
+            fill: '#cccccc', 
+            alpha: 0.5     
+        }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(20); 
 
         this.debugText = this.add.text(20, 20, 'Lực: 0', { fill: '#000', fontSize: '20px' }).setScrollFactor(0).setDepth(20);
 
-        // Sinh hộp đầu tiên (hệ thống thông minh sẽ tự tính hướng)
-        this.spawnNextBox(); 
-        this.updateCameraPosition(0); 
-
-        // 3. ĐĂNG KÝ SỰ KIỆN INPUT
         this.input.on('pointerdown', this.startCharge, this);
         this.input.on('pointerup', this.executeJump, this);
     }
 
-   update(time, delta) {
+    update(time, delta) {
         if (this.isCharging) {
             this.chargeTime += delta;
             if (this.chargeTime > this.maxChargeTime) this.chargeTime = this.maxChargeTime;
             
             let ratio = this.chargeTime / this.maxChargeTime;
             
-            // Lấy baseScale làm mốc để nhân/chia, không bao giờ bị lệch kích thước nữa
             this.player.scaleY = this.baseScale * (1 - (ratio * 0.3)); 
             this.player.scaleX = this.baseScale * (1 + (ratio * 0.1)); 
             this.currentBox.scaleY = this.baseScale * (1 - (ratio * 0.05));
+
+            if (this.chargeEmitter) {
+                let dynamicCenterY = this.player.y - (this.player.displayHeight / 2);
+                this.chargeEmitter.setPosition(this.player.x, dynamicCenterY);
+            }
 
             this.debugText.setText(`Lực: ${Math.floor(this.chargeTime)}`);
         }
     }
 
     startCharge() {
-        // Nếu đang nhảy lơ lửng thì cấm bấm
         if (this.player.isJumping) return; 
 
         this.isCharging = true;
         this.chargeTime = 0;
-        
-        // (Giai đoạn sau ta sẽ cho phát âm thanh tiếng lò xo nén ở đây)
+
+        // Bật SFX tụ lực
+        if (this.chargeSound) this.chargeSound.play();
+
+        // Kích hoạt hạt tụ lực bay lên
+          if (this.chargeEmitter) {
+            let dynamicCenterY = this.player.y - (this.player.displayHeight / 2);
+            this.chargeEmitter.setPosition(this.player.x, dynamicCenterY);
+            this.chargeEmitter.start();
+        }
     }
 
     executeJump() {
@@ -83,21 +128,24 @@ class GameScene extends Phaser.Scene {
         this.isCharging = false;
         this.player.isJumping = true; 
 
-        // Trả về kích thước baseScale thay vì số 1
+        // Tắt SFX tụ lực & phát SFX nhảy
+        if (this.chargeSound) this.chargeSound.stop();
+        this.sound.play('sfx_jump');
+
+        // Tắt hạt tụ lực
+        if (this.chargeEmitter) this.chargeEmitter.stop();
+
         this.tweens.add({ targets: this.player, scaleX: this.baseScale, scaleY: this.baseScale, duration: 100 });
         this.tweens.add({ targets: this.currentBox, scaleY: this.baseScale, duration: 300, ease: 'Elastic.easeOut' });
 
-        // 2. Tính toán điểm rơi dựa vào lực
         let distance = this.chargeTime * 0.5; 
         
-        // Fix tâm xoay: Đưa tâm về giữa để lộn vòng 360 độ cho đẹp
         this.player.setOrigin(0.5, 0.5);
         this.player.y -= this.playerHeight / 2;
 
         let startX = this.player.x;
         let startY = this.player.y;
         
-        // Tính góc 30 độ sang Radian
         let angleRad = 30 * (Math.PI / 180); 
         let sign = (this.jumpDirection === 'RIGHT') ? 1 : -1;
         
@@ -106,7 +154,6 @@ class GameScene extends Phaser.Scene {
         
         let peakHeight = distance * 0.5; 
 
-        // 3. Hoạt ảnh xoay lộn vòng (Bottle Flip)
         this.tweens.add({
             targets: this.player,
             angle: this.jumpDirection === 'RIGHT' ? 360 : -360,
@@ -114,13 +161,12 @@ class GameScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // 4. Tween Parabol chạy quỹ đạo bay
         let dummy = { t: 0 }; 
         this.tweens.add({
             targets: dummy,
             t: 1, 
             duration: 600,
-            ease: 'Quad.easeOut', 
+            ease: 'Linear', 
             onUpdate: () => {
                 let t = dummy.t; 
                 this.player.x = startX + (targetX - startX) * t;
@@ -128,13 +174,8 @@ class GameScene extends Phaser.Scene {
                 this.player.y = currentLineY - peakHeight * 4 * t * (1 - t);
             },
             onComplete: () => {
-                // --- CHÌA KHÓA NẰM Ở ĐÂY ---
-                // Cưỡng chế gắn tọa độ về chính xác điểm đích toán học 
-                // để bù trừ cho sai số thất thoát Frame của hàm onUpdate
                 this.player.x = targetX;
                 this.player.y = targetY;
-
-                // Bây giờ tính va chạm mới chuẩn 100%
                 this.checkLanding(targetX, targetY);
             }
         });
@@ -142,138 +183,165 @@ class GameScene extends Phaser.Scene {
         this.debugText.setText('Đang bay...');
     }
 
- checkLanding(targetX, targetY) {
+    checkLanding(targetX, targetY) {
         this.player.isJumping = false;
         this.player.angle = 0;
         this.player.setOrigin(0.5, 1);
-        this.player.y += this.playerHeight / 2;
+        this.player.y += this.playerHeight / 2; 
 
-        this.tweens.add({ targets: this.player, scaleY: this.baseScale * 0.85, duration: 50, yoyo: true, repeat: 1, ease: 'Quad.easeIn' });
+        // Lấy thông số hitbox động từ chính khối hộp mục tiêu
+        let surfaceOffset = this.nextBox.surfaceOffset;
+        let boxRadius = this.nextBox.boxRadius;
+        let perfectRadius = this.nextBox.perfectRadius;
 
-        let surfaceOffset = 28; 
         let targetSurfaceY = this.nextBox.y - surfaceOffset; 
+
+        // Cảm biến hít đất dọc 20px
+        let sensorLength = 40; 
+        if (this.player.y >= targetSurfaceY - sensorLength && this.player.y < targetSurfaceY) {
+            this.player.y = targetSurfaceY;
+        }
 
         let dx = this.player.x - this.nextBox.x;
         let dy = (this.player.y - targetSurfaceY) * 2; 
-        
         let distanceToCenter = Math.sqrt(dx*dx + dy*dy); 
-        
-        let boxRadius = 54;  
-        let perfectRadius = 16; 
+
+        // Sinh hiệu ứng khói tiếp đất chân thực
+        this.createDustParticles(this.player.x, this.player.y);
 
         if (distanceToCenter <= perfectRadius) {
-            // CỘNG 2 ĐIỂM VÀ UPDATE UI CHÍNH
-            this.score += 2;
+            this.tweens.add({ targets: this.player, scaleY: this.baseScale * 0.85, duration: 50, yoyo: true, repeat: 1, ease: 'Quad.easeIn' });
+            
+            // TĂNG COMBO VÀ TĂNG CAO ĐỘ SFX PERFECT
+            this.comboPerfect++;
+            let comboBonus = this.comboPerfect * 2;
+            this.score += comboBonus;
             this.scoreText.setText(this.score);
-            this.debugText.setText('PERFECT! (+2)');
+
+            // detune: Tăng 100 cents (1 bán âm) mỗi lần combo liên tục
+            this.sound.play('sfx_perfect', { detune: this.comboPerfect * 100 }); 
+            
+            this.debugText.setText(`PERFECT COMBO x${this.comboPerfect}! (+${comboBonus})`);
             this.handleSuccessJump();
         } 
         else if (distanceToCenter <= boxRadius) {
-            // CỘNG 1 ĐIỂM VÀ UPDATE UI CHÍNH
+            this.tweens.add({ targets: this.player, scaleY: this.baseScale * 0.85, duration: 50, yoyo: true, repeat: 1, ease: 'Quad.easeIn' });
+            
+            // Đứt chuỗi Combo, phát sfx tiếp đất thường
+            this.comboPerfect = 0; 
             this.score += 1;
             this.scoreText.setText(this.score);
+            this.sound.play('sfx_land');
+
             this.debugText.setText('GOOD (+1)');
             this.handleSuccessJump();
         } 
         else {
+            this.comboPerfect = 0;
             this.handleGameOver();
         }
     }
 
+   createDustParticles(x, y) {
+        if (!this.textures.exists('dust')) return;
+
+        // TĂNG KÍCH THƯỚC, TỐC ĐỘ VÀ SỐ LƯỢNG HẠT BỤI
+        this.add.particles(x, y, 'dust', {
+            speed: { min: 100, max: 250 },  // Tăng tốc độ khói bắn ra xa dứt khoát hơn (Cũ là 40 - 100)
+            angle: { min: 0, max: 360 },
+            scale: { start: 1.5, end: 0 },   // Phóng to hạt bụi lên gấp 3 lần bản cũ (Cũ là 0.5)
+            alpha: { start: 0.8, end: 0 },
+            lifespan: 400,                   // Khói tồn tại lâu hơn một chút (400ms)
+            gravityY: 150,                   // Thêm một chút trọng lực rơi nhẹ nhìn cho tự nhiên
+            maxParticles: 18                 // Tăng số lượng hạt bụi bắn ra (Cũ là 10)
+        });
+    }
+
     handleSuccessJump() {
         this.currentBox = this.nextBox;
-        
-        // (Đã xóa dòng đổi hướng jumpDirection ở đây vì spawnNextBox sẽ tự quyết định)
-        
         this.spawnNextBox();
         this.updateCameraPosition(500);
     }
 
     updateCameraPosition(duration) {
-        // TÍNH TỌA ĐỘ TRUNG ĐIỂM CỦA 2 KHỐI HỘP
         let midX = (this.currentBox.x + this.nextBox.x) / 2;
         let midY = (this.currentBox.y + this.nextBox.y) / 2;
 
         if (duration === 0) {
-            // Set ngay lập tức (dùng cho lúc mới vào game)
-            this.cameras.main.scrollX = midX - 225; // 225 là nửa chiều rộng màn hình
-            this.cameras.main.scrollY = midY - 400; // 400 là nửa chiều cao màn hình
+            this.cameras.main.scrollX = midX - 225; 
+            this.cameras.main.scrollY = midY - 400; 
         } else {
-            // Pan mượt mà (dùng cho lúc nhảy xong)
             this.cameras.main.pan(midX, midY, duration, 'Power2');
         }
     }
 
     handleGameOver() {
         this.debugText.setText('GAME OVER!');
+        this.sound.play('sfx_gameover');
         
-        // Hiệu ứng rớt vực
+        let isOvershot = false;
+        if (this.jumpDirection === 'RIGHT') {
+            isOvershot = this.player.x > this.nextBox.x;
+        } else {
+            isOvershot = this.player.x < this.nextBox.x;
+        }
+
+        let fallAngle = isOvershot ? (this.jumpDirection === 'RIGHT' ? 90 : -90) : (this.jumpDirection === 'RIGHT' ? -90 : 90);
+        let fallDistanceX = isOvershot ? (this.jumpDirection === 'RIGHT' ? 30 : -30) : (this.jumpDirection === 'RIGHT' ? -30 : 30);
+
         this.tweens.add({
             targets: this.player,
-            y: this.player.y + 200, // Rớt sâu xuống dưới
+            angle: fallAngle,
+            x: this.player.x + fallDistanceX,
+            y: this.player.y + 300, 
             alpha: 0,
-            duration: 500,
+            duration: 600,
+            ease: 'Cubic.easeIn', 
             onComplete: () => {
-                // Tạm thời dùng alert, sau này ta làm UI đẹp hơn
-                alert("Game Over! Nhấn OK để chơi lại.");
-                this.scene.restart(); // Chơi lại từ đầu
+                alert(`Game Over! Điểm số của bạn: ${this.score}`);
+                this.scene.restart(); 
             }
         });
     }
 
-   spawnNextBox() {
+    spawnNextBox() {
         let angleRad = 30 * (Math.PI / 180);
         let cos30 = Math.cos(angleRad);
         let sin30 = Math.sin(angleRad);
 
-        // 1. RANDOM HƯỚNG NHẢY (50% Phải, 50% Trái)
         this.jumpDirection = Math.random() > 0.5 ? 'RIGHT' : 'LEFT';
 
-        // 2. THUẬT TOÁN CHỐNG KẸT GÓC (SMART SPAWN)
-        let minDistance = 150; // Nhảy gần nhất cũng phải 150px
-        let maxTheoreticalDistance = 400; // Giới hạn lực tối đa không cho nhảy xa quá 400px
+        let minDistance = 150; 
+        let maxDistance = 300; 
 
-        // Tính lề an toàn: Hộp rộng 128px (tâm là 64). Cộng thêm 10px viền = 75px an toàn.
-        let safeMargin = 75; 
-        let safeMinX = safeMargin;             // Lề trái màn hình
-        let safeMaxX = 450 - safeMargin;       // Lề phải màn hình (Chiều rộng màn hình là 450)
-
-        let maxAvailableDistance = 0;
-
-        if (this.jumpDirection === 'RIGHT') {
-            maxAvailableDistance = (safeMaxX - this.currentBox.x) / cos30;
-            // Nếu không đủ khoảng trống bên Phải, ÉP QUAY ĐẦU SANG TRÁI
-            if (maxAvailableDistance < minDistance) {
-                this.jumpDirection = 'LEFT';
-                maxAvailableDistance = (this.currentBox.x - safeMinX) / cos30;
-            }
-        } else {
-            maxAvailableDistance = (this.currentBox.x - safeMinX) / cos30;
-            // Nếu không đủ khoảng trống bên Trái, ÉP QUAY ĐẦU SANG PHẢI
-            if (maxAvailableDistance < minDistance) {
-                this.jumpDirection = 'RIGHT';
-                maxAvailableDistance = (safeMaxX - this.currentBox.x) / cos30;
-            }
-        }
-
-        // Chốt lại khoảng cách max thực tế
-        let finalMaxDistance = Math.min(maxTheoreticalDistance, maxAvailableDistance);
-
-        // 3. RANDOM KHOẢNG CÁCH TRONG VÙNG AN TOÀN
-        let distance = Phaser.Math.Between(minDistance, finalMaxDistance);
+        let distance = Phaser.Math.Between(minDistance, maxDistance);
         let sign = (this.jumpDirection === 'RIGHT') ? 1 : -1;
         
         let nextX = this.currentBox.x + sign * distance * cos30;
         let nextY = this.currentBox.y - distance * sin30;
         
-        this.nextBox = this.add.sprite(nextX, nextY, 'box_normal');
+        // --- SPAWN RANDOM CÁC KHỐI HỘP KHÁC NHAU ---
+        let boxTypes = ['box_normal', 'box_round', 'box_gift'];
+        let randomType = boxTypes[Math.floor(Math.random() * boxTypes.length)];
+
+        // Tránh crash game nếu người chơi chưa chuẩn bị đủ ảnh trong BootScene
+        if (!this.textures.exists(randomType)) {
+            randomType = 'box_normal';
+        }
+
+        this.nextBox = this.add.sprite(nextX, nextY, randomType);
         this.nextBox.setOrigin(0.5, 0.5);
         this.nextBox.setScale(this.baseScale); 
         this.platforms.add(this.nextBox);
+
+        // ĐỒNG BỘ HITBOX ĐỘNG CHO HỘP ĐƯỢC SINH RA
+        let metadata = this.boxRegistry[randomType];
+        this.nextBox.surfaceOffset = metadata.surfaceOffset;
+        this.nextBox.boxRadius = metadata.boxRadius;
+        this.nextBox.perfectRadius = metadata.perfectRadius;
 
         this.nextBox.y -= 400; 
         this.nextBox.alpha = 0;
         this.tweens.add({ targets: this.nextBox, y: nextY, alpha: 1, duration: 400, ease: 'Bounce.easeOut' });
     }
-
 }
