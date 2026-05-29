@@ -22,11 +22,11 @@ class GameScene extends Phaser.Scene {
             'box_gift':   { surfaceOffset: 33, boxRadius: 70, perfectRadius: 18 }
         };
 
-        // 2. KHỞI TẠO GAME OBJECTS & AUDIO
+      // 2. KHỞI TẠO GAME OBJECTS & AUDIO
         this.platforms = this.add.group();
         
-        // Khởi tạo âm thanh nén lực dạng Loop (Lặp lại)
-        if (this.sound.get('sfx_charge')) {
+        // SỬA LỖI MẤT TIẾNG: Kiểm tra file âm thanh đã tải xong trong Cache chưa rồi khởi tạo trực tiếp
+        if (this.cache.audio.exists('sfx_charge')) {
             this.chargeSound = this.sound.add('sfx_charge', { loop: true });
         }
 
